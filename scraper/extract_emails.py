@@ -5,10 +5,10 @@ Uses regex patterns and comprehensive validation to ensure high-quality contact 
 """
 
 import re
+import csv
 from typing import List, Dict, Any, Set, Tuple
 from collections import defaultdict
 
-import pandas as pd
 from bs4 import BeautifulSoup
 
 import config
@@ -233,35 +233,47 @@ def save_emails_to_csv(extraction_results: List[Dict[str, Any]]) -> None:
                 'is_priority': is_priority_email(email)
             })
 
-    df = pd.DataFrame(rows)
-
-    if not df.empty:
-        # Remove duplicates
-        df = df.drop_duplicates(subset=['university', 'email'])
+    if rows:
+        # Remove duplicates based on university + email
+        unique_rows = []
+        seen = set()
+        for row in rows:
+            key = (row['university'], row['email'])
+            if key not in seen:
+                seen.add(key)
+                unique_rows.append(row)
 
         # Sort by priority, then university
-        df = df.sort_values(['is_priority', 'university'], ascending=[False, True])
+        unique_rows.sort(key=lambda x: (not x['is_priority'], x['university']))
 
-        df.to_csv(config.EMAILS_EXTRACTED_CSV, index=False)
-        logger.info(f"Saved {len(df)} unique emails to {config.EMAILS_EXTRACTED_CSV}")
+        # Write to CSV
+        with open(config.EMAILS_EXTRACTED_CSV, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.DictWriter(f, fieldnames=['university', 'domains', 'email', 'is_priority'])
+            writer.writeheader()
+            writer.writerows(unique_rows)
+
+        logger.info(f"Saved {len(unique_rows)} unique emails to {config.EMAILS_EXTRACTED_CSV}")
     else:
         logger.warning("No emails to save to CSV")
 
 
-def load_emails_from_csv() -> pd.DataFrame:
+def load_emails_from_csv() -> List[Dict[str, Any]]:
     """
     Load emails from CSV file.
     
     Returns:
-        DataFrame with email data
+        List of email dictionaries
     
     Raises:
         FileNotFoundError: If CSV file doesn't exist
     """
     try:
-        df = pd.read_csv(config.EMAILS_EXTRACTED_CSV)
-        logger.info(f"Loaded {len(df)} emails from {config.EMAILS_EXTRACTED_CSV}")
-        return df
+        with open(config.EMAILS_EXTRACTED_CSV, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            emails = list(reader)
+
+        logger.info(f"Loaded {len(emails)} emails from {config.EMAILS_EXTRACTED_CSV}")
+        return emails
     except FileNotFoundError:
         logger.error(f"Emails CSV not found: {config.EMAILS_EXTRACTED_CSV}")
         raise

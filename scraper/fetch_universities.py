@@ -1,5 +1,5 @@
 """
-Fetch US universities from Hipolabs API.
+Fetch US universities from multiple API sources with fallback.
 
 Retrieves, validates, and stores university data including names, domains, and web pages.
 """
@@ -15,76 +15,138 @@ from utils.validators import is_valid_url, normalize_url
 
 logger = setup_logger(__name__)
 
+# Multiple API sources (in order of preference)
+API_SOURCES = [
+    {
+        'name': 'Hipolabs API',
+        'url': 'https://universities.hipolabs.com/search?country=United%20States',
+        'timeout': 30
+    },
+    {
+        'name': 'GitHub Repository (all universities)',
+        'url': 'https://raw.githubusercontent.com/Hipo/university-domains-list/master/world_universities_and_domains.json',
+        'timeout': 60,
+        'filter_country': 'United States'  # Need to filter for US only
+    }
+]
+
+
+def fetch_from_source(source: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Fetch universities from a single source.
+    
+    Args:
+        source: Source configuration dictionary
+    
+    Returns:
+        List of university dictionaries
+    
+    Raises:
+        Exception: If fetch fails
+    """
+    logger.info(f"Trying source: {source['name']}")
+    logger.info(f"URL: {source['url']}")
+
+    response = requests.get(
+        source['url'],
+        timeout=source.get('timeout', 30),
+        headers={'User-Agent': config.USER_AGENTS[0]}
+    )
+    response.raise_for_status()
+
+    universities = response.json()
+
+    # Filter by country if needed
+    if source.get('filter_country'):
+        country = source['filter_country']
+        universities = [u for u in universities if u.get('country') == country]
+        logger.info(f"Filtered to {len(universities)} universities in {country}")
+
+    return universities
+
 
 def fetch_universities() -> List[Dict[str, Any]]:
     """
-    Fetch list of US universities from API.
+    Fetch list of US universities from API with fallback sources.
     
     Returns:
         List of university dictionaries with validated data
     
     Raises:
-        Exception: If API request fails
+        Exception: If all API sources fail
     """
-    logger.info(f"Fetching universities from {config.UNIVERSITIES_API_URL}")
+    logger.info(f"Fetching US universities from multiple sources")
 
-    try:
-        response = requests.get(
-            config.UNIVERSITIES_API_URL,
-            timeout=30,
-            headers={'User-Agent': config.USER_AGENTS[0]}
-        )
-        response.raise_for_status()
+    universities_raw = None
+    last_error = None
 
-        universities_raw = response.json()
-        logger.info(f"Fetched {len(universities_raw)} universities from API")
+    # Try each source in order
+    for source in API_SOURCES:
+        try:
+            universities_raw = fetch_from_source(source)
+            logger.info(f"✓ Successfully fetched from {source['name']}")
+            break  # Success, stop trying
+        except requests.RequestException as e:
+            last_error = e
+            logger.warning(f"✗ Failed to fetch from {source['name']}: {e}")
+            continue  # Try next source
+        except json.JSONDecodeError as e:
+            last_error = e
+            logger.warning(f"✗ Failed to parse response from {source['name']}: {e}")
+            continue  # Try next source
+        except Exception as e:
+            last_error = e
+            logger.warning(f"✗ Unexpected error from {source['name']}: {e}")
+            continue  # Try next source
 
-        # Validate and clean data
-        universities_clean = []
-        skipped = 0
+    # If all sources failed
+    if universities_raw is None:
+        error_msg = f"Failed to fetch universities from all sources. Last error: {last_error}"
+        logger.error(error_msg)
+        raise Exception(error_msg)
 
-        for uni in universities_raw:
-            # Skip if missing required fields
-            if not uni.get('name') or not uni.get('domains') or not uni.get('web_pages'):
-                skipped += 1
-                logger.debug(f"Skipping university with missing data: {uni.get('name', 'UNKNOWN')}")
-                continue
+    logger.info(f"Fetched {len(universities_raw)} universities from API")
 
-            # Validate and normalize URLs
-            web_pages = []
-            for url in uni['web_pages']:
-                if is_valid_url(url):
-                    web_pages.append(normalize_url(url))
+    # Validate and clean data
+    universities_clean = []
+    skipped = 0
 
-            if not web_pages:
-                skipped += 1
-                logger.debug(f"Skipping {uni['name']} - no valid web pages")
-                continue
+    for uni in universities_raw:
+        # Skip if missing required fields
+        if not uni.get('name') or not uni.get('domains') or not uni.get('web_pages'):
+            skipped += 1
+            logger.debug(f"Skipping university with missing data: {uni.get('name', 'UNKNOWN')}")
+            continue
 
-            # Create clean record
-            clean_uni = {
-                'name': uni['name'].strip(),
-                'domains': [d.strip().lower() for d in uni['domains']],
-                'web_pages': web_pages,
-                'country': uni.get('country', 'United States'),
-                'alpha_two_code': uni.get('alpha_two_code', 'US')
-            }
+        # Validate and normalize URLs
+        web_pages = []
+        for url in uni['web_pages']:
+            if is_valid_url(url):
+                web_pages.append(normalize_url(url))
 
-            universities_clean.append(clean_uni)
+        if not web_pages:
+            skipped += 1
+            logger.debug(f"Skipping {uni['name']} - no valid web pages")
+            continue
 
-        logger.info(f"Validated {len(universities_clean)} universities ({skipped} skipped)")
+        # Create clean record
+        clean_uni = {
+            'name': uni['name'].strip(),
+            'domains': [d.strip().lower() for d in uni['domains']],
+            'web_pages': web_pages,
+            'country': uni.get('country', 'United States'),
+            'alpha_two_code': uni.get('alpha_two_code', 'US'),
+            'state_province': uni.get('state-province', uni.get('state_province'))
+        }
 
-        # Save to file
-        save_universities(universities_clean)
+        universities_clean.append(clean_uni)
 
-        return universities_clean
+    logger.info(f"Validated {len(universities_clean)} universities ({skipped} skipped)")
 
-    except requests.RequestException as e:
-        logger.error(f"Failed to fetch universities: {e}")
-        raise
-    except json.JSONDecodeError as e:
-        logger.error(f"Failed to parse API response: {e}")
-        raise
+    # Save to file
+    save_universities(universities_clean)
+
+    return universities_clean
 
 
 def save_universities(universities: List[Dict[str, Any]]) -> None:

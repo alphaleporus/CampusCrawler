@@ -6,6 +6,7 @@ Attempts multiple common contact page paths with proper rate limiting and error 
 
 import asyncio
 import random
+import re
 from typing import List, Dict, Any, Optional
 from urllib.parse import urljoin
 
@@ -27,6 +28,7 @@ class ContactPageCrawler:
         self.max_retries = config.MAX_RETRIES
         self.rate_limit_delay = config.RATE_LIMIT_DELAY
         self.user_agents = config.USER_AGENTS
+        self.email_pattern = re.compile(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b')
 
     def _get_random_user_agent(self) -> str:
         """
@@ -137,6 +139,38 @@ class ContactPageCrawler:
             logger.warning(f"✗ {name}: No contact pages found")
 
         return result
+
+    def extract_emails_from_html(self, html: str) -> set:
+        """
+        Extract all email addresses from HTML content.
+        
+        Args:
+            html: HTML content as string
+        
+        Returns:
+            Set of unique email addresses found
+        """
+        emails = set()
+
+        # Extract from text content
+        text_emails = self.email_pattern.findall(html)
+        emails.update(text_emails)
+
+        # Extract from mailto links
+        try:
+            soup = BeautifulSoup(html, 'html5lib')
+            mailto_links = soup.find_all('a', href=re.compile(r'^mailto:', re.IGNORECASE))
+
+            for link in mailto_links:
+                href = link.get('href', '')
+                # Remove 'mailto:' prefix and any parameters
+                email = href.replace('mailto:', '').split('?')[0].strip()
+                if email:
+                    emails.add(email)
+        except Exception as e:
+            logger.debug(f"Error parsing HTML for mailto links: {e}")
+
+        return emails
 
     async def crawl_universities(
             self,
