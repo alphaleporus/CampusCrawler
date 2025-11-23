@@ -79,6 +79,12 @@ EMAIL_JITTER_MIN = float(os.getenv("EMAIL_JITTER_MIN", "3"))  # seconds
 EMAIL_JITTER_MAX = float(os.getenv("EMAIL_JITTER_MAX", "7"))  # seconds
 EMAIL_MAX_RETRIES = int(os.getenv("EMAIL_MAX_RETRIES", "2"))
 
+# Gmail daily sending limits
+# Free Gmail: 500 emails/day
+# Google Workspace: 2000 emails/day
+# Set a conservative limit to avoid hitting the cap
+GMAIL_DAILY_LIMIT = int(os.getenv("GMAIL_DAILY_LIMIT", "450"))  # Default to 450 to stay safe
+
 # Gmail SMTP settings (loaded from .env file)
 SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))

@@ -104,7 +104,86 @@ python main.py --crawl-limit 10
 python main.py --crawl-limit 10 --live
 ```
 
-## 📖 Usage Guide
+## 🆕 New Features: Daily Limit & Duplicate Prevention
+
+The `auto_run.py` script now includes intelligent features to respect Gmail's sending limits and prevent duplicate
+emails:
+
+### Key Features
+
+✅ **Automatic Daily Limit Enforcement** - Respects Gmail's 500 emails/day limit (configurable)  
+✅ **Duplicate Prevention** - Skips universities that have already been contacted  
+✅ **Resume Capability** - Can be run multiple times to continue where it left off  
+✅ **Real-time Progress Tracking** - Shows emails sent today and remaining capacity  
+✅ **Auto-Exit on Limit** - Automatically stops and exits when Gmail rejects due to daily limit
+
+### Quick Check Status
+
+```bash
+# Check current status (emails sent today, universities remaining)
+python3 test_daily_limit.py
+
+# Check when you can send again
+python3 check_send_time.py
+```
+
+### Configuration
+
+Set your daily limit in `.env` or `config.py`:
+
+```bash
+# Free Gmail: 450 (safe buffer below 500)
+# Google Workspace: 1900 (safe buffer below 2000)
+GMAIL_DAILY_LIMIT=450
+```
+
+### Usage Pattern
+
+```bash
+# Day 1: Sends up to 450 emails, then stops
+python3 auto_run.py
+
+# Same day again: Skips (daily limit reached)
+python3 auto_run.py
+
+# Day 2: Sends next batch, skips already-contacted universities
+python3 auto_run.py
+```
+
+**📖 For detailed documentation, see [DAILY_LIMIT_GUIDE.md](DAILY_LIMIT_GUIDE.md)**
+
+## Usage Guide
+
+### Auto Run
+
+The simplest way to run the complete pipeline is by using the `auto_run.py` script. This script executes the complete
+pipeline end-to-end with no flags, no testing, just pure automation.
+
+**To use the auto_run.py script:**
+
+```bash
+# 1. Configure your credentials in .env
+cp .env.example .env
+nano .env  # Add your Gmail credentials
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Run everything with ONE command
+python3 auto_run.py
+```
+
+This will automatically:
+
+- Fetch 2,349 US universities
+- Crawl all websites for contact pages
+- Extract and rank top 3 emails per university (using AI scoring)
+- Send personalized emails to Primary, Secondary, and Tertiary contacts
+- Log everything to database with full tracking
+
+**NO FLAGS. NO DRY-RUN. Pure production mode.**
+
+⚠️ **Warning**: This sends REAL emails! Make sure your Gmail credentials are correct.
 
 ### Command Line Arguments
 
@@ -255,8 +334,6 @@ CREATE TABLE email_campaigns (
 - ✅ Uses appropriate user-agents
 - ✅ Implements reasonable rate limiting
 - ✅ Provides accurate sender information
-- ✅ Includes opt-out information (can add to template)
-
 ### Best Practices
 
 1. **Start small**: Test with `--crawl-limit 5` first
@@ -374,3 +451,4 @@ outreach only. Always respect recipient preferences and local regulations regard
 **Institution**: BVDU(COEP), Pune, India
 
 *"Consistency Compounds."* - Naval Ravikant
+

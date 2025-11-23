@@ -5,7 +5,7 @@ Uses SQLite for local storage with full ACID compliance.
 """
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -224,6 +224,100 @@ class Database:
         except sqlite3.Error as e:
             logger.error(f"Error checking email existence: {e}")
             return False
+
+    def university_has_sent_emails(self, university: str) -> bool:
+        """
+        Check if any emails have been sent to a university.
+        
+        Args:
+            university: University name
+        
+        Returns:
+            True if at least one email has been sent, False otherwise
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM email_campaigns
+                WHERE university = ? AND status = ?
+            """, (university, config.STATUS_SENT))
+
+            return cursor.fetchone()['count'] > 0
+        except sqlite3.Error as e:
+            logger.error(f"Error checking university sent status: {e}")
+            return False
+
+    def get_emails_sent_today(self) -> int:
+        """
+        Get count of emails sent today.
+        
+        Returns:
+            Number of emails sent today
+        """
+        try:
+            cursor = self.conn.cursor()
+            today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM email_campaigns
+                WHERE status = ? AND sent_at >= ?
+            """, (config.STATUS_SENT, today_start))
+
+            return cursor.fetchone()['count']
+        except sqlite3.Error as e:
+            logger.error(f"Error getting today's email count: {e}")
+            return 0
+
+    def get_emails_sent_last_24h(self) -> int:
+        """
+        Get count of emails sent in the last 24 hours (rolling window).
+        
+        This matches Gmail's rolling 24-hour limit enforcement.
+        
+        Returns:
+            Number of emails sent in last 24 hours
+        """
+        try:
+            cursor = self.conn.cursor()
+            twenty_four_hours_ago = datetime.now() - timedelta(hours=24)
+
+            cursor.execute("""
+                SELECT COUNT(*) as count
+                FROM email_campaigns
+                WHERE status = ? AND sent_at >= ?
+            """, (config.STATUS_SENT, twenty_four_hours_ago))
+
+            return cursor.fetchone()['count']
+        except sqlite3.Error as e:
+            logger.error(f"Error getting last 24h email count: {e}")
+            return 0
+
+    def get_universities_without_sent_emails(self) -> List[str]:
+        """
+        Get list of universities that haven't had any emails sent yet.
+        
+        Returns:
+            List of university names
+        """
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute("""
+                SELECT DISTINCT university
+                FROM email_campaigns
+                WHERE university NOT IN (
+                    SELECT DISTINCT university
+                    FROM email_campaigns
+                    WHERE status = ?
+                )
+                ORDER BY university
+            """, (config.STATUS_SENT,))
+
+            return [row['university'] for row in cursor.fetchall()]
+        except sqlite3.Error as e:
+            logger.error(f"Error getting universities without sent emails: {e}")
+            return []
 
     def close(self) -> None:
         """Close database connection."""

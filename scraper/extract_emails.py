@@ -2,6 +2,7 @@
 Extract and validate email addresses from crawled pages.
 
 Uses regex patterns and comprehensive validation to ensure high-quality contact emails.
+Now includes 3-tier contact ranking to select best 3 emails per university.
 """
 
 import re
@@ -13,6 +14,7 @@ from bs4 import BeautifulSoup
 
 import config
 from utils.logger import setup_logger
+from utils.contact_ranker import ranker
 from utils.validators import (
     is_valid_email,
     is_university_email,
@@ -95,26 +97,29 @@ class EmailExtractor:
 
         return valid_emails, discarded
 
-    def prioritize_emails(self, emails: List[str]) -> List[str]:
+    def rank_emails(self, emails: List[str]) -> List[str]:
         """
-        Sort emails by priority (admissions@, info@, etc. first).
+        Rank emails using the contact ranker.
         
         Args:
             emails: List of email addresses
         
         Returns:
-            Sorted list with priority emails first
+            Ranked list with top 3 emails
         """
-        priority = []
-        regular = []
+        # Use Contact Ranker to select TOP 3 emails
+        ranking_result = ranker.select_top_3(emails, '')
 
-        for email in emails:
-            if is_priority_email(email):
-                priority.append(email)
-            else:
-                regular.append(email)
+        # Extract just the top 3 emails
+        top_3_emails = []
+        if ranking_result['primary']:
+            top_3_emails.append(ranking_result['primary']['email'])
+        if ranking_result['secondary']:
+            top_3_emails.append(ranking_result['secondary']['email'])
+        if ranking_result['tertiary']:
+            top_3_emails.append(ranking_result['tertiary']['email'])
 
-        return priority + regular
+        return top_3_emails
 
     def extract_from_university(
             self,
@@ -127,7 +132,7 @@ class EmailExtractor:
             crawl_result: Result from crawling a university
         
         Returns:
-            Dictionary with university info and extracted emails
+            Dictionary with university info and extracted emails (TOP 3 ONLY)
         """
         name = crawl_result['name']
         domains = crawl_result['domains']
@@ -139,6 +144,7 @@ class EmailExtractor:
                 'name': name,
                 'domains': domains,
                 'emails': [],
+                'ranking_info': None,
                 'discarded': [],
                 'pages_processed': 0
             }
@@ -159,20 +165,32 @@ class EmailExtractor:
             primary_domain
         )
 
-        # Remove duplicates and prioritize
+        # Remove duplicates
         valid_emails = list(set(valid_emails))
-        valid_emails = self.prioritize_emails(valid_emails)
 
-        logger.info(f"{name}: Extracted {len(valid_emails)} valid emails ({len(discarded)} discarded)")
+        # Use Contact Ranker to select TOP 3 emails
+        ranking_result = ranker.select_top_3(valid_emails, name)
+
+        # Extract just the top 3 emails
+        top_3_emails = []
+        if ranking_result['primary']:
+            top_3_emails.append(ranking_result['primary']['email'])
+        if ranking_result['secondary']:
+            top_3_emails.append(ranking_result['secondary']['email'])
+        if ranking_result['tertiary']:
+            top_3_emails.append(ranking_result['tertiary']['email'])
+
+        logger.info(
+            f"{name}: Selected {len(top_3_emails)} top emails from {len(valid_emails)} valid ({len(discarded)} discarded)")
 
         return {
             'name': name,
             'domains': domains,
-            'emails': valid_emails,
+            'emails': top_3_emails,  # Only top 3!
+            'ranking_info': ranking_result,  # Full ranking details
             'discarded': discarded,
             'pages_processed': len(pages)
         }
-
 
 def extract_all_emails(
         crawl_results: List[Dict[str, Any]]

@@ -20,6 +20,11 @@ from emailer.template import generate_email
 logger = setup_logger(__name__)
 
 
+class GmailDailyLimitError(Exception):
+    """Exception raised when Gmail's daily sending limit is exceeded."""
+    pass
+
+
 class EmailSender:
     """Asynchronous email sender using SMTP."""
 
@@ -108,33 +113,56 @@ class EmailSender:
             # Create message
             message = self._create_message(recipient_email, subject, body)
 
-            # Send via SMTP
+            # Send via SMTP with timeout
             logger.info(f"Sending email to {recipient_email} ({university_name})...")
+            logger.info(f"DEBUG: Message 'To' header: {message['To']}")
+            logger.info(f"DEBUG: Envelope will use recipient: {recipient_email}")
 
-            async with aiosmtplib.SMTP(
-                    hostname=self.smtp_host,
-                    port=self.smtp_port,
-                    use_tls=False
-            ) as smtp:
-                await smtp.connect()
-                await smtp.starttls()
-                await smtp.login(self.sender_email, self.sender_password)
-                await smtp.send_message(message)
+            # Add timeout to prevent hanging
+            async with asyncio.timeout(30):  # 30 second timeout
+                async with aiosmtplib.SMTP(
+                        hostname=self.smtp_host,
+                        port=self.smtp_port,
+                        start_tls=True,
+                        timeout=15  # Connection timeout
+                ) as smtp:
+                    await smtp.login(self.sender_email, self.sender_password)
+                    await smtp.send_message(message)
 
             logger.info(f"✓ Successfully sent email to {recipient_email}")
             return True, None
 
+        except asyncio.TimeoutError:
+            error_msg = "SMTP timeout - connection took too long"
+            logger.error(f"✗ Timeout sending to {recipient_email}: {error_msg}")
+            logger.debug(traceback.format_exc())
+
+            # Don't retry on timeout
+            return False, error_msg
+
         except aiosmtplib.SMTPException as e:
             error_msg = f"SMTP error: {str(e)}"
+
+            # Check for Gmail daily limit error - don't retry, raise immediately
+            if '5.4.5' in str(e) and ('Daily' in str(e) or 'daily' in str(e)):
+                logger.error(f"✗ Gmail daily limit reached for {recipient_email}")
+                raise GmailDailyLimitError(f"Gmail daily sending limit exceeded: {str(e)}")
+
             logger.error(f"✗ Failed to send to {recipient_email}: {error_msg}")
             logger.debug(traceback.format_exc())
 
-            # Retry logic
+            # Retry logic for other errors
             if retry_count < config.EMAIL_MAX_RETRIES:
                 logger.info(f"Retrying {recipient_email} (attempt {retry_count + 1})...")
                 await asyncio.sleep(5)
                 return await self.send_single_email(university_name, recipient_email, retry_count + 1)
 
+            return False, error_msg
+
+        except GmailDailyLimitError as e:
+            error_msg = f"Gmail daily limit error: {str(e)}"
+            logger.error(f"✗ Failed to send to {recipient_email}: {error_msg}")
+            logger.debug(traceback.format_exc())
             return False, error_msg
 
         except Exception as e:
