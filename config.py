@@ -1,5 +1,5 @@
 """
-Configuration file for University Merch Bot.
+Configuration file for University Merchandise bot.
 
 All project-wide settings, paths, and constants are defined here.
 Sensitive credentials are loaded from .env file.
