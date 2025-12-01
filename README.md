@@ -107,7 +107,7 @@ python main.py --crawl-limit 10 --live
 ## 🆕 New Features: Daily Limit & Duplicate Prevention
 
 The `auto_run.py` script now includes intelligent features to respect Gmail's sending limits and prevent duplicate
-emails:
+emails:-
 
 ### Key Features
 
